@@ -1,0 +1,312 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+}
+
+enum LeadCandidateStatus {
+  NEW
+  PROMOTED
+  REJECTED
+}
+
+enum LeadClassification {
+  HOT
+  WARM
+  COLD
+}
+
+enum LeadPipelineStatus {
+  LEAD_FOUND
+  LEAD_QUALIFIED
+  CONTACT_STARTED
+  IN_CONVERSATION
+  MEETING_HANDOFF
+  PROPOSAL_NEGOTIATION
+  WAITING_DECISION
+  WON
+  LOST
+}
+
+enum LeadSourceType {
+  GOOGLE_MAPS
+  GOOGLE_SEARCH
+  TICKETING_SITE
+  PUBLIC_REGISTRY
+  MANUAL_WEBSITE
+  OTHER
+}
+
+enum ConversationChannel {
+  WHATSAPP
+}
+
+enum ConversationStatus {
+  PENDING
+  ACTIVE
+  NEEDS_REVIEW
+  HANDOFF
+  CLOSED
+  LOST
+}
+
+enum QualificationStep {
+  RESPONSIBLE
+  EVENT_TYPE
+  AUDIENCE
+  COMMERCIAL_STACK
+  NEXT_EVENT
+  COMPLETE
+  HUMAN_REVIEW
+}
+
+enum MessageDirection {
+  OUTBOUND
+  INBOUND
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  QUALIFICATION
+  STATUS_UPDATE
+}
+
+enum WhatsAppSessionStatus {
+  DISCONNECTED
+  QR_PENDING
+  CONNECTED
+  ERROR
+}
+
+enum CampaignBatchStatus {
+  DRAFT
+  QUEUED
+  RUNNING
+  COMPLETED
+  PAUSED
+  CANCELLED
+}
+
+enum CampaignLeadStatus {
+  QUEUED
+  SENT
+  REPLIED
+  HANDOFF
+  SKIPPED
+  FAILED
+}
+
+model User {
+  id                   String               @id @default(cuid())
+  name                 String
+  email                String               @unique
+  passwordHash         String
+  role                 UserRole             @default(ADMIN)
+  active               Boolean              @default(true)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  requestedBatches     CampaignBatch[]      @relation("RequestedBy")
+  performedTransitions PipelineTransition[] @relation("TransitionedBy")
+}
+
+model LeadCandidate {
+  id               String              @id @default(cuid())
+  displayName      String
+  normalizedPhone  String?
+  rawPhone         String?
+  instagram        String?
+  cnpj             String?
+  city             String?
+  state            String?
+  leadCategory     String?
+  eventType        String?
+  sourceSummary    String?
+  evidenceSummary  String?
+  confidence       Int                 @default(0)
+  hasEventEvidence Boolean             @default(false)
+  status           LeadCandidateStatus @default(NEW)
+  metadata         Json?
+  promotedLead     Lead?
+  evidences        LeadSourceEvidence[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+}
+
+model Lead {
+  id                      String             @id @default(cuid())
+  name                    String
+  normalizedPhone         String             @unique
+  rawPhone                String
+  whatsapp                String?
+  instagram               String?
+  cnpj                    String?            @unique
+  city                    String?
+  state                   String?
+  leadCategory            String?
+  eventType               String?
+  originPrimary           LeadSourceType
+  score                   Int                @default(0)
+  classification          LeadClassification @default(COLD)
+  pipelineStatus          LeadPipelineStatus @default(LEAD_FOUND)
+  sourceConfidence        Int                @default(0)
+  notes                   String?
+  promotedFromCandidateId String?            @unique
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+  promotedFromCandidate   LeadCandidate?     @relation(fields: [promotedFromCandidateId], references: [id], onDelete: SetNull)
+  evidences               LeadSourceEvidence[]
+  scoreSnapshots          ScoreSnapshot[]
+  conversations           Conversation[]
+  qualification           QualificationAnswer?
+  pipelineTransitions     PipelineTransition[]
+  campaignLinks           CampaignBatchLead[]
+}
+
+model LeadSourceEvidence {
+  id           String         @id @default(cuid())
+  candidateId  String?
+  leadId       String?
+  sourceType   LeadSourceType
+  sourceLabel  String
+  sourceUrl    String?
+  confidence   Int
+  phoneFound   String?
+  eventSignals Json?
+  payload      Json?
+  isPrimary    Boolean        @default(false)
+  createdAt    DateTime       @default(now())
+  candidate    LeadCandidate? @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  lead         Lead?          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+}
+
+model ScoreSnapshot {
+  id             String             @id @default(cuid())
+  leadId         String
+  totalScore     Int
+  classification LeadClassification
+  breakdown      Json
+  createdAt      DateTime           @default(now())
+  lead           Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+}
+
+model Conversation {
+  id               String              @id @default(cuid())
+  leadId           String
+  campaignBatchId  String?
+  channel          ConversationChannel @default(WHATSAPP)
+  status           ConversationStatus  @default(PENDING)
+  currentStep      QualificationStep   @default(RESPONSIBLE)
+  meetingRequested Boolean             @default(false)
+  needsHumanReview Boolean             @default(false)
+  aiSummary        String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  lead             Lead                @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  campaignBatch    CampaignBatch?      @relation(fields: [campaignBatchId], references: [id], onDelete: SetNull)
+  campaignLink     CampaignBatchLead?
+  messages         Message[]
+  qualification    QualificationAnswer?
+}
+
+model Message {
+  id             String           @id @default(cuid())
+  conversationId String
+  direction      MessageDirection
+  type           MessageType      @default(TEXT)
+  content        String
+  read           Boolean          @default(false)
+  confidence     Int?
+  metadata       Json?
+  sentAt         DateTime         @default(now())
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+model QualificationAnswer {
+  id                 String        @id @default(cuid())
+  leadId             String        @unique
+  conversationId     String?       @unique
+  responsibleAnswer  String?
+  isResponsible      Boolean?
+  eventTypeAnswer    String?
+  nextEventAt        String?
+  audienceSizeAnswer String?
+  estimatedAudience  Int?
+  sellsOnline        Boolean?
+  paidTraffic        Boolean?
+  completedAt        DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  lead               Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  conversation       Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+}
+
+model WhatsAppSession {
+  id              String                @id @default(cuid())
+  label           String                @default("77 Marketing")
+  status          WhatsAppSessionStatus @default(DISCONNECTED)
+  qrCodeDataUrl   String?
+  sessionToken    String?
+  connectedAt     DateTime?
+  lastHeartbeatAt DateTime?
+  metadata        Json?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+}
+
+model CampaignBatch {
+  id                 String              @id @default(cuid())
+  name               String
+  status             CampaignBatchStatus @default(DRAFT)
+  dailyLimit         Int                 @default(20)
+  overrideDailyLimit Boolean             @default(false)
+  intervalMinSeconds Int                 @default(45)
+  intervalMaxSeconds Int                 @default(120)
+  windowStart        String              @default("09:00")
+  windowEnd          String              @default("18:00")
+  query              String?
+  notes              String?
+  requestedById      String?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  requestedBy        User?               @relation("RequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  conversations      Conversation[]
+  selectedLeads      CampaignBatchLead[]
+}
+
+model CampaignBatchLead {
+  id              String             @id @default(cuid())
+  campaignBatchId String
+  leadId          String
+  conversationId  String?            @unique
+  status          CampaignLeadStatus @default(QUEUED)
+  queuedAt        DateTime           @default(now())
+  sentAt          DateTime?
+  lastAttemptAt   DateTime?
+  campaignBatch   CampaignBatch      @relation(fields: [campaignBatchId], references: [id], onDelete: Cascade)
+  lead            Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  conversation    Conversation?      @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@unique([campaignBatchId, leadId])
+}
+
+model PipelineTransition {
+  id            String             @id @default(cuid())
+  leadId        String
+  fromStatus    LeadPipelineStatus?
+  toStatus      LeadPipelineStatus
+  reason        String?
+  performedById String?
+  createdAt     DateTime           @default(now())
+  lead          Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  performedBy   User?              @relation("TransitionedBy", fields: [performedById], references: [id], onDelete: SetNull)
+}
